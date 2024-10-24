@@ -11,7 +11,8 @@ def comms(port, baud, timeout):             # Serial Communication with VAL364
 
     except:
         print("Connection Error")
-        return(1)
+        #soft_pwm.stop()
+        #GPIO.cleanup()
 
 
 class ccTalk_read():                        # Checking slave data
@@ -387,43 +388,27 @@ class ccTalk_write():                       # Master command label to decimal co
                   "Address:", error_label[0], 
                   "/ Data length:", error_label[1],
                   "/ Header:", error_label [2],
-                  "/ Recieved data:", error_label[3])             # If 'slave_msg'tail' fails,
-                                                            # this means the device failed to respond
-                                                            # most likely due to an error from the master message
+                  "/ Recieved data:", error_label[3])           # If 'slave_msg'tail' fails,
+                                                                # this means the device failed to respond
+                                                                # most likely due to an error from the master message
 
 
     def cmd_msg_label(self):                    # Master message identification
         command_types = {
             'poll' : [55, 0, 254],                  # Currently set for CX only(55), backplane is 240, To be improved for device unification
-            'request id' : [55, 0, 245],
-            'gate' : [55, 1, 240, 1],
-            'sorter 1' : [55, 2, 240, 0, 1],
             'self_check' : [55, 0, 232],
             'enable_coin' : [55, 2, 231, 255, 255],
-            'disable_coin' : [55, 2, 231, 0, 0],
-            'inhibit_status' : [55, 0, 230],
             'read_credit' : [55, 0, 229],
-            'enable_master' : [241, 1, 228, 1],
-            'dispense_all' : [240, 6, 97, 1, 1, 1, 1, 1, 0],
-            'dispense_unique' : [240, 6, 97, 0, 0, 1, 0, 1, 0],
-            0 : [240, 6, 97, 1, 0, 0, 0, 0, 0],          # Dispense A
-            1 : [240, 6, 97, 0, 1, 0, 0, 0, 0],          # Dispense B
-            2 : [240, 6, 97, 0, 0, 1, 0, 0, 0],          # Dispense C
-            3 : [240, 6, 97, 0, 0, 0, 1, 0, 0],          # Dispense D
-            4 : [240, 6, 97, 0, 0, 0, 0, 1, 0],          # Dispense E
-            'dispense_none' : [240, 1, 91, 21],
-            'request_adc' : [240, 1, 91, 12 ],
-            'read_bp_temp' : [240, 1, 91, 8],
-            'read_adc': [240, 1, 90, 12],
-            'backplane_status' : [240, 0, 98],
-            'backplane_details' : [240, 0, 99]
+            'enable_master' : [241, 1, 228, 1],         
+            'abort_dispense' : [240, 0 ,96],            # Command to re-enable coin acceptance
+            0 : [240, 6, 97, 1, 0, 0, 0, 0, 0],         # Dispense A
+            1 : [240, 6, 97, 0, 1, 0, 0, 0, 0],         # Dispense B
+            2 : [240, 6, 97, 0, 0, 1, 0, 0, 0],         # Dispense C
+            3 : [240, 6, 97, 0, 0, 0, 1, 0, 0],         # Dispense D
+            4 : [240, 6, 97, 0, 0, 0, 0, 1, 0]          # Dispense E
+            
         }
         return(command_types.get(self.cmd))
-
-
-def endprogram():
-    soft_pwm.stop()
-    GPIO.cleanup()
 
 
 if __name__ == "__main__":
@@ -455,9 +440,8 @@ if __name__ == "__main__":
     ccTalk_write('poll').command()
     ccTalk_write('self_check').command()
     ccTalk_write('enable_coin').command()
-    ccTalk_write('enable_master').command()
+    # ccTalk_write('enable_master').command()
     read_coin = ccTalk_write('read_credit')
-    bp_status = ccTalk_write("backplane_status")
     
     #soft_pwm.ChangeDutyCycle(motor_speed)
 
@@ -470,13 +454,20 @@ if __name__ == "__main__":
         
         if event_count != event_data[0]:
             event_count = event_data[0]
-            ccTalk_write(tube_position).command()
-            #print(bp_status.command())
-            print("Event count:", event_count, "Tube position:", tube_position)
             
-            if tube_position == 4:
-                tube_position = 0
+            if event_data[1] == 0 and event_data[2] == 1:
+                continue
+            
             else:
-                tube_position += 1
+                ccTalk_write(tube_position).command()
+                time.sleep(0.5)
+            
+                ccTalk_write('abort_dispense').command()
+                print("Event count:", event_count, "Tube position:", tube_position)
+            
+                if tube_position == 4:
+                    tube_position = 0
+                else:
+                    tube_position += 1
             
 
