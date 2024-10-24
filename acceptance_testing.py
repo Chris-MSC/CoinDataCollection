@@ -1,4 +1,4 @@
-#import RPi.GPIO as GPIO
+import RPi.GPIO as GPIO
 import serial
 import time
 
@@ -163,7 +163,10 @@ class ccTalk_msg():                         # ccTalk message generator
         hex_convert = list(hex)                     # Place formatted data into a list
         
         if len(hex) == 3:
-            hex_convert = ['0'] + hex_convert       # Add hidden zero value to front of hexidecimal 
+            hex_convert = ['0'] + hex_convert       # Add hidden zero value to front of hexidecimal
+        
+        elif len(hex) ==2:
+            hex_convert = ['0','0'] + hex_convert 
 
         crc_array = [hex_convert[0] + hex_convert[1], hex_convert[2] + hex_convert[3]] # [LSB, MSB] string clean up
         
@@ -419,7 +422,7 @@ if __name__ == "__main__":
     timeout = 2
     
     # RPi setup
-    '''
+    
     GPIO.setwarnings(False)
     GPIO.setmode(GPIO.BOARD)
     GPIO.setup(40, GPIO.OUT)
@@ -427,15 +430,16 @@ if __name__ == "__main__":
     soft_pwm = GPIO.PWM(40, 1)
     soft_pwm.start(0)
     motor_speed = 0
-    '''
+    
 
     # CX Setup
     event_count = 0
     tube_position = 0
     loop_count = 0
+    timeout_count = 5
 
     # Main code
-    val364 = comms(windows_com_port, baud_rate, timeout)
+    val364 = comms(linux_com_port, baud_rate, timeout)
     
     ccTalk_write('poll').command()
     ccTalk_write('self_check').command()
@@ -443,19 +447,20 @@ if __name__ == "__main__":
     # ccTalk_write('enable_master').command()
     read_coin = ccTalk_write('read_credit')
     
-    #soft_pwm.ChangeDutyCycle(motor_speed)
+    soft_pwm.ChangeDutyCycle(motor_speed)
 
     while True: 
         event_data = read_coin.command()
         #print(event_data)
-        time.sleep(0.3)
-        
+        timeout_count -= 1
 
         
         if event_count != event_data[0]:
+            soft_pwm.ChangeDutyCycle(motor_speed)
             event_count = event_data[0]
             
             if event_data[1] == 0 and event_data[2] == 1:
+                timeout_count -= 1
                 continue
             
             else:
@@ -464,10 +469,22 @@ if __name__ == "__main__":
             
                 ccTalk_write('abort_dispense').command()
                 print("Event count:", event_count, "Tube position:", tube_position)
-            
+                timeout_count = 5
+
                 if tube_position == 4:
                     tube_position = 0
                 else:
                     tube_position += 1
-            
 
+        time.sleep(2)
+
+        if timeout_count < 0:
+            soft_pwm.ChangeDutyCycle(100)
+            print("stopped")
+
+            while timeout_count < 0:
+                time.sleep(1)
+                event_data = read_coin.command()
+                if event_count != event_data[0]:
+                    timeout_count = 5
+                    break
