@@ -26,8 +26,7 @@ class ccTalk_read():                        # Checking slave data
         self.decimal = self.hex_convert()           # Class will always convert byte array to hexidecimal to decimal.   
 
 
-    def msg_check(self):                        # Checks the converted decimal array's CRC values
-                                            
+    def msg_check(self):                        # Checks the converted decimal array's CRC values                                   
         self.address = self.decimal[0]  
         self.header = self.decimal[3]
 
@@ -70,6 +69,13 @@ class ccTalk_read():                        # Checking slave data
 
         return(dec_array)                           # Return the decimal converted byte array
 
+
+    def msg_translation(self):                  # Isolates ccTalk message parameters for data manipulation                                          
+        self.address = self.decimal[0]              # Address destination
+        self.length = self.decimal[1]               # Data length
+        self.header = self.decimal[3]               # Device recipient
+        self.data = self.decimal[4 : 4 + self.decimal[1]]     # data starts at the 4th byte and count from 4 + length of data.
+        return(self.address, self.length, self.header, self.data)
 
     def slave_msg_label(self):                  # Slave message identification
         header_types = {                            # Dictionary of responses                  
@@ -152,7 +158,6 @@ class ccTalk_msg():                         # ccTalk message generator
         ##################################################### Result is in Decimal request Hex conversion        
         
         hex = '{0:x}'.format(crc)                   # I assume hexidecimal formatting      
-        hex = (4 - len(hex)) * '0' + hex
         hex_convert = list(hex)                     # Place formatted data into a list
         crc_array = [hex_convert[0] + hex_convert[1], hex_convert[2] + hex_convert[3]] # [LSB, MSB] string clean up
         
@@ -331,7 +336,6 @@ class ccTalk_write():                       # Master command label to decimal co
     def __init__(self, cmd):                    # Initialization
         self.cmd = cmd
 
-
     def command(self):                          # Generate message parameters from command label              
         self.parameters = self.cmd_msg_label()
         
@@ -346,37 +350,60 @@ class ccTalk_write():                       # Master command label to decimal co
             self.header = self.parameters[2]
             self.data = self.parameters[3:]         # Creates a specific array for data, which is extracted in .message()
                                                     # Parses message parameters to generate ccTalk message
-        host_msg = ccTalk_msg(self.address, self.length, self.header, self.data).message()
+        host_reply = ccTalk_msg(self.address, self.length, self.header, self.data)
+        host_msg = host_reply.message()
                                                     # Cross checks message label from generated message
-        host_label = ccTalk_msg(self.address, self.length, self.header, self.data).host_msg_label() 
+        host_label = host_reply.host_msg_label() 
         val364.write(host_msg)                      # Sends generated message from ccTalk_msg() class
-        print("Sent message ", host_msg, host_label)
+        print("Sent message:", host_msg, host_label)
 
         slave_msg_head = val364.read(4)             # Read the first 4 bytes of data from slave
         try:
             slave_msg_tail = val364.read(slave_msg_head[1] + 1) # Reads the remain bytes of data including the MSB CRC
             slave_msg_raw = slave_msg_head + slave_msg_tail     # Combine the data arrays to get full ccTalk message
-            slave_msg = ccTalk_read(slave_msg_raw).msg_check()  # Cross checks the CRC to insure correct message was received
-            slave_label = ccTalk_read(slave_msg_raw).slave_msg_label()  # Cross checks message label from received message
-            print("Recieved message", slave_label)
-            return(slave_msg) 
+            slave_reply = ccTalk_read(slave_msg_raw)
+            slave_msg = slave_reply.msg_check()  # Cross checks the CRC to insure correct message was received
+            
+            if slave_msg[1] == 0:
+                slave_label = slave_reply.slave_msg_label()  # Cross checks message label from received message
+                print("Recieved message:", slave_msg, slave_label)
+
+            else:
+                slave_label = slave_reply.msg_translation() # Extracts data from recived message
+                print("Recieved data:", slave_label[3])
+                #print("address =", slave_label[0], "/ data length =", slave_label[1], "/ header =", slave_label[2])
+                return(slave_label[3])
+
+
         except:
-            print('No response or an error occured')                    # If 'slave_msg'tail' fails,
-            return(slave_msg_head)                                      # this means the device failed to respond
+            print(slave_msg_head, 'No response or an error occured')    # If 'slave_msg'tail' fails,
+                                                                        # this means the device failed to respond
                                                                         # most likely due to an error from the master message
 
 
     def cmd_msg_label(self):                    # Master message identification
         command_types = {
-            'poll' : [55, 0, 254],                  # Currently set for CX only(55), backplane is 240
-            'dispense' : [240, 6, 97, 1, 1, 1, 1, 1, 0],
+            'poll' : [55, 0, 254],                  # Currently set for CX only(55), backplane is 240, To be improved for device unification
+            'request id' : [55, 0, 245],
+            'gate' : [55, 1, 240, 1],
+            'sorter 1' : [55, 2, 240, 0, 1],
+            'self_check' : [55, 0, 232],
+            'enable_coin' : [55, 2, 231, 255, 255],
+            'disable_coin' : [55, 2, 231, 0, 0],
+            'inhibit_status' : [55, 0, 230],
+            'read_credit' : [55, 0, 229],
+            'enable_master' : [241, 1, 228, 1],
+            'dispense_all' : [240, 6, 97, 1, 1, 1, 1, 1, 0],
+            'dispense_unique' : [240, 6, 97, 0, 0, 1, 0, 1, 0],
             'dispense_a' : [240, 6, 97, 1, 0, 0, 0, 0, 0],
             'dispense_b' : [240, 6, 97, 0, 1, 0, 0, 0, 0],
             'dispense_c' : [240, 6, 97, 0, 0, 1, 0, 0, 0],
             'dispense_d' : [240, 6, 97, 0, 0, 0, 1, 0, 0],
             'dispense_e' : [240, 6, 97, 0, 0, 0, 0, 1, 0],
+            'dispense_none' : [240, 1, 91, 21],
             'request_adc' : [240, 1, 91, 12 ],
-            'read_adc': [240, 1, 90, 12]
+            'read_bp_temp' : [240, 1, 91, 8],
+            'read_adc': [240, 1, 90, 12],
         }
         return(command_types.get(self.cmd))
 
@@ -416,54 +443,28 @@ if __name__ == "__main__":
         endprogram()
     
 '''    
+if __name__ == "__main__":
     # Serial Communication Parameters
-    com_port = "/dev/ttyUSB0"
+    windows_com_port = "COM3"
+    linux_com_port = "/dev/ttyUSB0"
     baud_rate = 57600
     timeout = 2
-
-    #coin_count=[77, 76, 85, 108, 78, 0]                 #Mexican Cassette
-    coin_count = [200, 200, 200, 200, 200]              
-    count = 0
-    finish_flag = sum(coin_count)
     
     # Main code
-    val364 = comms(com_port, baud_rate, timeout)
+    val364 = comms(windows_com_port, baud_rate, timeout)
     
-    while finish_flag != 0:
-        
-        
-        tube_a = ccTalk_write('dispense_a').command()
-        print('tube a')
-        coin_count[0] -= 1
-        time.sleep(2)
+    ccTalk_write('poll').command()
+    ccTalk_write('self_check').command()
+    ccTalk_write('enable_coin').command()
+    ccTalk_write('enable_master').command()
+    ccTalk_write('request id').command()
+    ccTalk_write('gate').command()
+    read_coin = ccTalk_write('read_credit')
 
-        tube_b = ccTalk_write('dispense_b').command()
-        print('tube b')
-        coin_count[1] -= 1
-        time.sleep(2)
-
-        tube_c = ccTalk_write('dispense_c').command()
-        print('tube c')
-        coin_count[2] -= 1
-        time.sleep(2)
-       
-        tube_d = ccTalk_write('dispense_d').command()
-        print('tube d')
-        coin_count[2] -= 1
-        time.sleep(2)
-
-        tube_e = ccTalk_write('dispense_e').command()
-        print('tube e')
-        coin_count[4] -= 1
-        time.sleep(2)
-
-        """ tube_special = ccTalk_write('dispense_none').command()
-        time.sleep(1)
-        count = count + 1
-        print(count) """
-
-        finish_flag = sum(coin_count)
-        #print(finish_flag)
+    while True:
+        data = read_coin.command()
+        time.sleep(0.2)
+        print("Poll")
 '''
     
 
