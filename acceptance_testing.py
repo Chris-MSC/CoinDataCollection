@@ -1,4 +1,4 @@
-import RPi.GPIO as GPIO
+#import RPi.GPIO as GPIO
 import serial
 import time
 
@@ -76,6 +76,7 @@ class ccTalk_read():                        # Checking slave data
         self.header = self.decimal[3]               # Device recipient
         self.data = self.decimal[4 : 4 + self.decimal[1]]     # data starts at the 4th byte and count from 4 + length of data.
         return(self.address, self.length, self.header, self.data)
+
 
     def slave_msg_label(self):                  # Slave message identification
         header_types = {                            # Dictionary of responses                  
@@ -159,6 +160,10 @@ class ccTalk_msg():                         # ccTalk message generator
         
         hex = '{0:x}'.format(crc)                   # I assume hexidecimal formatting      
         hex_convert = list(hex)                     # Place formatted data into a list
+        
+        if len(hex) == 3:
+            hex_convert = ['0'] + hex_convert       # Add hidden zero value to front of hexidecimal 
+
         crc_array = [hex_convert[0] + hex_convert[1], hex_convert[2] + hex_convert[3]] # [LSB, MSB] string clean up
         
         return(crc_array)                           # Return calculated CRC values                                          
@@ -355,7 +360,7 @@ class ccTalk_write():                       # Master command label to decimal co
                                                     # Cross checks message label from generated message
         host_label = host_reply.host_msg_label() 
         val364.write(host_msg)                      # Sends generated message from ccTalk_msg() class
-        print("Sent message:", host_msg, host_label)
+        #print("Sent message:", host_msg, host_label)
 
         slave_msg_head = val364.read(4)             # Read the first 4 bytes of data from slave
         try:
@@ -366,19 +371,25 @@ class ccTalk_write():                       # Master command label to decimal co
             
             if slave_msg[1] == 0:
                 slave_label = slave_reply.slave_msg_label()  # Cross checks message label from received message
-                print("Recieved message:", slave_msg, slave_label)
+                #print("Recieved message:", slave_msg, slave_label)
 
             else:
                 slave_label = slave_reply.msg_translation() # Extracts data from recived message
-                print("Recieved data:", slave_label[3])
+                #print("Recieved data:", slave_label[3])
                 #print("address =", slave_label[0], "/ data length =", slave_label[1], "/ header =", slave_label[2])
                 return(slave_label[3])
 
 
         except:
-            print(slave_msg_head, 'No response or an error occured')    # If 'slave_msg'tail' fails,
-                                                                        # this means the device failed to respond
-                                                                        # most likely due to an error from the master message
+            error_msg = ccTalk_read(slave_msg_head)
+            error_label = error_msg.msg_translation()
+            print('No response or an error occured;', 
+                  "Address:", error_label[0], 
+                  "/ Data length:", error_label[1],
+                  "/ Header:", error_label [2],
+                  "/ Recieved data:", error_label[3])             # If 'slave_msg'tail' fails,
+                                                            # this means the device failed to respond
+                                                            # most likely due to an error from the master message
 
 
     def cmd_msg_label(self):                    # Master message identification
@@ -395,39 +406,20 @@ class ccTalk_write():                       # Master command label to decimal co
             'enable_master' : [241, 1, 228, 1],
             'dispense_all' : [240, 6, 97, 1, 1, 1, 1, 1, 0],
             'dispense_unique' : [240, 6, 97, 0, 0, 1, 0, 1, 0],
-            'dispense_a' : [240, 6, 97, 1, 0, 0, 0, 0, 0],
-            'dispense_b' : [240, 6, 97, 0, 1, 0, 0, 0, 0],
-            'dispense_c' : [240, 6, 97, 0, 0, 1, 0, 0, 0],
-            'dispense_d' : [240, 6, 97, 0, 0, 0, 1, 0, 0],
-            'dispense_e' : [240, 6, 97, 0, 0, 0, 0, 1, 0],
+            0 : [240, 6, 97, 1, 0, 0, 0, 0, 0],          # Dispense A
+            1 : [240, 6, 97, 0, 1, 0, 0, 0, 0],          # Dispense B
+            2 : [240, 6, 97, 0, 0, 1, 0, 0, 0],          # Dispense C
+            3 : [240, 6, 97, 0, 0, 0, 1, 0, 0],          # Dispense D
+            4 : [240, 6, 97, 0, 0, 0, 0, 1, 0],          # Dispense E
             'dispense_none' : [240, 1, 91, 21],
             'request_adc' : [240, 1, 91, 12 ],
             'read_bp_temp' : [240, 1, 91, 8],
             'read_adc': [240, 1, 90, 12],
+            'backplane_status' : [240, 0, 98],
+            'backplane_details' : [240, 0, 99]
         }
         return(command_types.get(self.cmd))
 
-
-GPIO.setwarnings(False)
-GPIO.setmode(GPIO.BOARD)
-GPIO.setup(40, GPIO.OUT)
-GPIO.setup(18, GPIO.OUT)
-soft_pwm = GPIO.PWM(40, 1)
-
-
-def setup():
-    soft_pwm.start(0)
-    
-
-def loop():
-    while True:
-        #soft_gpio.ChangeDutyCycle(100)
-        
-    
-        soft_pwm.ChangeDutyCycle(100)
-        print('off')
-        #time.sleep(5)
-        
 
 def endprogram():
     soft_pwm.stop()
@@ -435,21 +427,28 @@ def endprogram():
 
 
 if __name__ == "__main__":
-    setup()
-    try:
-        loop()
-    except KeyboardInterrupt:
-        print('Keyboard Interrupt Detected')
-        endprogram()
-    
-'''    
-if __name__ == "__main__":
     # Serial Communication Parameters
     windows_com_port = "COM3"
     linux_com_port = "/dev/ttyUSB0"
     baud_rate = 57600
     timeout = 2
     
+    # RPi setup
+    '''
+    GPIO.setwarnings(False)
+    GPIO.setmode(GPIO.BOARD)
+    GPIO.setup(40, GPIO.OUT)
+    GPIO.setup(18, GPIO.OUT)
+    soft_pwm = GPIO.PWM(40, 1)
+    soft_pwm.start(0)
+    motor_speed = 0
+    '''
+
+    # CX Setup
+    event_count = 0
+    tube_position = 0
+    loop_count = 0
+
     # Main code
     val364 = comms(windows_com_port, baud_rate, timeout)
     
@@ -457,14 +456,27 @@ if __name__ == "__main__":
     ccTalk_write('self_check').command()
     ccTalk_write('enable_coin').command()
     ccTalk_write('enable_master').command()
-    ccTalk_write('request id').command()
-    ccTalk_write('gate').command()
     read_coin = ccTalk_write('read_credit')
-
-    while True:
-        data = read_coin.command()
-        time.sleep(0.2)
-        print("Poll")
-'''
+    bp_status = ccTalk_write("backplane_status")
     
+    #soft_pwm.ChangeDutyCycle(motor_speed)
+
+    while True: 
+        event_data = read_coin.command()
+        #print(event_data)
+        time.sleep(0.3)
+        
+
+        
+        if event_count != event_data[0]:
+            event_count = event_data[0]
+            ccTalk_write(tube_position).command()
+            #print(bp_status.command())
+            print("Event count:", event_count, "Tube position:", tube_position)
+            
+            if tube_position == 4:
+                tube_position = 0
+            else:
+                tube_position += 1
+            
 
