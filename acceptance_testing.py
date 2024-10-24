@@ -422,45 +422,41 @@ if __name__ == "__main__":
     timeout = 2
     
     # RPi setup
-    
     GPIO.setwarnings(False)
     GPIO.setmode(GPIO.BOARD)
-    GPIO.setup(40, GPIO.OUT)
-    GPIO.setup(18, GPIO.OUT)
-    soft_pwm = GPIO.PWM(40, 1)
-    soft_pwm.start(0)
-    motor_speed = 0
+    GPIO.setup(40, GPIO.OUT)                # Setting pin 40 to be an output
+    soft_pwm = GPIO.PWM(40, 1)              # Setting pin 40 to be PWM output
+    soft_pwm.start(0)                       # Starting PWM duty cycle of 0%
+    motor_start = 0                         # Motor running at 0% PWM (pin 40 LOW)
+    motor_stop = 100                        # Motor stopped at 100% PWM (pin 40 HIGH)
     
-
     # CX Setup
-    event_count = 0
-    tube_position = 0
-    loop_count = 0
-    timeout_count = 5
+    event_count = 0                         # Event count tracks when the CX encouters a new event
+    tube_position = 0                       # Tube count tracks cassette tube selection for dispensing
+    timeout_count = 0                       # Timeout count is tracks the loops until CX times out and stops
+    timeout_reset = 50                     # Value used to reset the timeout count
 
     # Main code
-    val364 = comms(linux_com_port, baud_rate, timeout)
+    val364 = comms(linux_com_port, baud_rate, timeout)      # Communication via VAL364
     
-    ccTalk_write('poll').command()
-    ccTalk_write('self_check').command()
-    ccTalk_write('enable_coin').command()
-    # ccTalk_write('enable_master').command()
-    read_coin = ccTalk_write('read_credit')
+    ccTalk_write('poll').command()                          # Simple poll to help confirm communication
+    ccTalk_write('self_check').command()                    # CX self check command
+    ccTalk_write('enable_coin').command()                   # Enable all coins on CX
+    read_coin = ccTalk_write('read_credit')                 # Read the last 5 events, returns a list
     
-    soft_pwm.ChangeDutyCycle(motor_speed)
+    soft_pwm.ChangeDutyCycle(motor_start)                   # Start the motor
+    timeout_count = timeout_reset                           # Reset timeout timer
 
-    while True: 
+    while True:                                             # Main program loop
         event_data = read_coin.command()
-        #print(event_data)
         timeout_count -= 1
-
         
         if event_count != event_data[0]:
-            soft_pwm.ChangeDutyCycle(motor_speed)
             event_count = event_data[0]
             
             if event_data[1] == 0 and event_data[2] == 1:
                 timeout_count -= 1
+                print("Rejected coin", "Event count:", event_count, "Tube position:", tube_position)
                 continue
             
             else:
@@ -468,23 +464,38 @@ if __name__ == "__main__":
                 time.sleep(0.5)
             
                 ccTalk_write('abort_dispense').command()
-                print("Event count:", event_count, "Tube position:", tube_position)
-                timeout_count = 5
+                print("Dispense", "Event count:", event_count, "Tube position:", tube_position)
+                timeout_count = timeout_reset
 
                 if tube_position == 4:
                     tube_position = 0
                 else:
                     tube_position += 1
 
-        time.sleep(2)
+        elif timeout_count == 1:
+            ccTalk_write(tube_position).command()
+            time.sleep(0.5)
+            
+            ccTalk_write('abort_dispense').command()
+            print("Additional Dispense", "Event count:", event_count, "Tube position:", tube_position)
 
-        if timeout_count < 0:
-            soft_pwm.ChangeDutyCycle(100)
-            print("stopped")
+            if tube_position == 4:
+                tube_position = 0
+            else:
+                tube_position += 1
+            time.sleep(5)
+        
+        time.sleep(0.5)
 
-            while timeout_count < 0:
-                time.sleep(1)
+        if timeout_count == 0:
+            soft_pwm.ChangeDutyCycle(motor_stop)
+            print("Stopped", "Event count:", event_count, "Tube position:", tube_position)
+
+            while timeout_count == 0:
+                time.sleep(0.5)
                 event_data = read_coin.command()
+                
                 if event_count != event_data[0]:
-                    timeout_count = 5
+                    timeout_count = timeout_reset
+                    soft_pwm.ChangeDutyCycle(motor_start)
                     break
